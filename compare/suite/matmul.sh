@@ -5,7 +5,7 @@
 #
 # usage: matmul.sh ours|dean   -> one JSON line {"cu", "jit_ns", "interp_ns", "ok"}
 set -euo pipefail
-root=/home/ubuntu/svm-vec
+root=$(cd "$(dirname "$0")/../.." && pwd)
 w=$root/target/suite/matmul
 data=$w/data
 seeds="1 2 3 4 5"
