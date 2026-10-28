@@ -1,0 +1,19 @@
+diff --git a/simd-falcon/program/src/lib.rs b/simd-falcon/program/src/lib.rs
+--- a/simd-falcon/program/src/lib.rs
++++ b/simd-falcon/program/src/lib.rs
+@@ -93,6 +93,15 @@ fn verify(sig: &[u8; SIG_LEN], message: &[u8]) -> bool {
+ #[no_mangle]
+ pub unsafe extern "C" fn entrypoint(input: *mut u8) -> u64 {
+     let ix_data_len = unsafe { core::ptr::read(input.add(8) as *const u64) } as usize;
++    // keccak-only benchmark (added for the comparison): 8 bytes of instruction data = k
++    if ix_data_len == 8 {
++        let k = unsafe { core::ptr::read_unaligned(input.add(16) as *const u64) };
++        generated::keccak_init();
++        for _ in 0..k {
++            generated::keccak_f();
++        }
++        return 0;
++    }
+     if ix_data_len < SIG_LEN {
+         return ERR_INVALID_DATA;
+     }

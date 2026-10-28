@@ -8,12 +8,13 @@ run=$root/harness/target/release/svm-run
 rm -rf "$out" && mkdir -p "$out"
 
 cargo build -q --release --manifest-path "$root/harness/Cargo.toml"
-(cd "$root/programs" && ./build.sh mlp >/dev/null 2>&1 && ./build.sh keccak >/dev/null 2>&1)
+(cd "$root/programs" && for p in mlp keccak falcon; do ./build.sh $p >/dev/null 2>&1; done)
 (cd "$root/programs/mlp" && cargo +nightly build-sbpf -q --features scalar-only --target-dir target-scalar 2>/dev/null)
-for h in mlp keccak; do cargo build -q --release --manifest-path "$root/programs/$h/host/Cargo.toml"; done
+for h in mlp keccak falcon; do cargo build -q --release --manifest-path "$root/programs/$h/host/Cargo.toml"; done
 
 "$root/programs/mlp/host/target/release/mlp-host" "$out/mlp" 1 >/dev/null
 for k in 0 100; do "$root/programs/keccak/host/target/release/keccak-host" "$out/keccak$k" $k 1 >/dev/null; done
+"$root/programs/falcon/host/target/release/falcon-host" "$out/falcon" >/dev/null
 
 # case: label, .so, input dir, mode (scalar|vector)
 case_json() {
@@ -43,3 +44,7 @@ for name, s, v in rows:
     print(f"| {name} | {s:{f}} | {v:{f}} | {s / v:.0f}× |")
 print("\nall outputs match the host references on both engines")
 EOF
+
+echo
+echo "falcon-512 verify, 64 signatures:"
+python3 "$root/programs/falcon/bench.py" "$out/falcon" --runs 50

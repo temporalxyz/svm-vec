@@ -1,0 +1,10 @@
+[package]
+name = "falcon-host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+sha3 = "0.10"
+
+[workspace]
