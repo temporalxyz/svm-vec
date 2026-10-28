@@ -6,7 +6,7 @@ zen 4 (epyc 9534), per permutation: k = 100 permutations minus k = 0. cu are ide
 |---|---:|---:|---:|
 | cu per permutation | 11,824 | 1,348 | **988** |
 | ops per round | ~493 scalar insns | 28 calls × 2 cu | **41** × 1 cu |
-| jit ns per permutation | 8,900 | 445 | **320–372** |
+| jit ns per permutation | 8,900 | 445 | **264–274** |
 | interpreter µs per permutation | 48 | 54 | 30 |
 
 - scalar and ours: `programs/keccak` on `svm-run`, output checked against the host reference on both engines

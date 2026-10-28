@@ -3,6 +3,10 @@
 //! interpreter and the JIT, then times program and baseline the way svm-run --repeat does (fresh
 //! VM per run on one memory mapping, batches of about 2 ms, median of 9).
 //!
+//! Every other op (and variant) of the op table is generated from [OPS] and checked interpreter
+//! against JIT on the whole VM state (the ops themselves are checked against the native
+//! instructions in sbpf/tests/vector.rs).
+//!
 //!     opbench [filter]   -> one JSON line {"ops": [...], "ok": bool}
 
 #[allow(dead_code)]
@@ -15,7 +19,7 @@ use solana_sbpf::{
     error::ProgramResult,
     memory_region::{MemoryMapping, MemoryRegion},
     program::{BuiltinProgram, FunctionRegistry, SBPFVersion},
-    vector::{encode, encode_with_offset, op},
+    vector::{encode, encode_masked, encode_with_offset, op, Kind, OpInfo, VectorRegister, OPS},
     verifier::RequisiteVerifier,
     vm::{CallFrame, Config, ContextObject, EbpfVm, ExecutionMode},
 };
@@ -151,9 +155,7 @@ fn shape(name: &str) -> Option<Shape> {
         "narrowus.d.b" => R2(op::NARROWUS_D_B, 0),
         "narrows.d.b" => R2(op::NARROWS_D_B, 0),
         "narrows.d.w" => R2(op::NARROWS_D_W, 0),
-        "insert.q" | "insert.q+extract.q" | "ld" | "st" | "ld*16" | "st*16" | "ldbc.d" | "ldbc.q" => {
-            Custom
-        }
+        "insert.q" | "insert.q+extract.q" | "ld" | "st" | "ld*16" | "st*16" | "ldbc.d" | "ldbc.q" => Custom,
         _ => return None,
     })
 }
@@ -187,20 +189,162 @@ fn instance(name: &str, dep: bool, j: usize) -> Vec<u64> {
     }
 }
 
+/// One generated benchmark: an op of the table with a fixed imm8 and mask mode
+struct Gen {
+    info: &'static OpInfo,
+    imm8: u8,
+    mode: u8,
+    name: String,
+}
+
+/// Index vector of gathers and scatters
+const IDX: usize = 11;
+
+impl Gen {
+    /// Whether a dependent variant exists (the op reads a vector it writes)
+    fn dep(&self) -> bool {
+        use Kind::*;
+        matches!(self.info.kind, R3 | R3i | A3 | A3i | R2 | R2i | A2 | A2i | Ai)
+    }
+
+    /// Whether r1 is a value, not an address
+    fn r1_value(&self) -> bool {
+        matches!(self.info.kind, Kind::Ls | Kind::Ai) && !self.info.accesses_memory()
+    }
+
+    /// Instance j of the loop body
+    fn instance(&self, dep: bool, j: usize) -> u64 {
+        use Kind::*;
+        let c = chain(dep, j);
+        let count = self.info.imm8_is_count();
+        let ls_off = if matches!(self.info.name, "ldbc.b" | "ldbc.w") { bc_off(j) } else { mem_off(j) };
+        let (out, in0, in1, off) = match self.info.kind {
+            R3 | R3i => (c, c, 1, 0),
+            A3 | A3i => (c, 1, 2, 0),
+            R2 | R2i => (c, c, 0, 0),
+            A2 | A2i => (c, 1, 0, 0),
+            R0 | Ai => (c, 0, 0, 0),
+            Ls if self.info.accesses_memory() => (c, 0, 0, ls_off),
+            Ls => (c, 0, 0, 0),
+            St => (0, c, 0, mem_off(j)),
+            Sr | Sri => (0, c, 0, 0),
+            S3 | S3i => (0, c, 1, 0),
+            S0 => (0, 0, 0, 0),
+            Lsi if count => (0, 0, 0, bulk_off(j)),
+            Lsi => (c, 0, 0, mem_off(j)),
+            Sti if count => (0, 0, 0, bulk_off(j)),
+            Sti => (0, c, 0, mem_off(j)),
+            Ga => (c, IDX, 0, SCRATCH),
+            Sc => (0, IDX, c, SCRATCH),
+        };
+        encode_masked(self.info.op, self.imm8, out as u8, in0 as u8, in1 as u8, off as i16, self.mode)
+    }
+
+    /// Input of seed: for gathers and scatters, v11 holds indices below 64 (a 512-byte window
+    /// for scale 8)
+    fn input(&self, seed: u64) -> Vec<u8> {
+        let mut x = input(seed);
+        if matches!(self.info.kind, Kind::Ga | Kind::Sc) {
+            let q_index = matches!(self.info.name, "gather.qq" | "gather.qd" | "scatter.qq" | "scatter.qd");
+            let w = if q_index { 8 } else { 4 };
+            let idx = &mut x[64 * IDX..64 * IDX + 64];
+            for (i, lane) in idx.chunks_mut(w).enumerate() {
+                let v = (lane[0] as u64 * 7 + i as u64) % 64;
+                lane.copy_from_slice(&v.to_le_bytes()[..w]);
+            }
+        }
+        x
+    }
+}
+
+/// Generated benchmarks of every implemented op of the table: all lane widths of ops with a width
+/// in imm8, the cheapest and the most expensive imm8 of `bcast.*`, several `ldn`/`stn` counts and
+/// `cmp` predicates, the scale matching the element of gathers and scatters, and masked forms of a
+/// few ops. Ops benchmarked in spec.rs with mode 0 and a single imm8 are left out.
+fn generated(covered: &[&str]) -> Vec<Gen> {
+    let mut v = vec![];
+    for info in OPS.iter().filter(|i| i.implemented) {
+        let name = info.name;
+        let modes = info.modes();
+        let mode = if modes & 1 != 0 {
+            0
+        } else if modes & 4 != 0 {
+            2
+        } else {
+            1
+        };
+        let valid = |imm8: &u8| info.imm8_is_valid(*imm8);
+        let max_imm = (0..=255u8).rev().find(valid).unwrap();
+        let mut imms: Vec<(u8, String)> = match name {
+            "blendm" | "perm2i" | "perm2t" | "unpacklo" | "unpackhi" | "compress" | "expand" | "test" | "testn"
+            | "ld.m" | "st.m" => {
+                (0..4u8).filter(valid).map(|w| (w, format!("{name}[{}]", ["b", "w", "d", "q"][w as usize]))).collect()
+            }
+            "cmp" => [
+                (0x00, "eq.b"),
+                (0x01, "lt.b"),
+                (0x11, "lt.w"),
+                (0x21, "lt.d"),
+                (0x31, "lt.q"),
+                (0x39, "ltu.q"),
+                (0x36, "gt.q"),
+            ]
+            .iter()
+            .map(|(i, p)| (*i, format!("cmp[{p}]")))
+            .collect(),
+            "ldn" | "stn" => [2, 4, 8, 12].iter().map(|n| (*n, format!("{name}[{n}]"))).collect(),
+            _ if name.starts_with("bcast.") => [0, max_imm].iter().map(|i| (*i, format!("{name}[{i}]"))).collect(),
+            "gather.qq" | "gather.dq" | "scatter.qq" | "scatter.dq" => vec![(3, name.to_string())],
+            "gather.dd" | "gather.qd" | "scatter.dd" | "scatter.qd" => vec![(2, name.to_string())],
+            _ if covered.contains(&name) => vec![],
+            _ if valid(&0x1b) => vec![(0x1b, name.to_string())],
+            _ => vec![(max_imm, name.to_string())],
+        };
+        if mode != 0 {
+            for (_, n) in &mut imms {
+                n.push_str(&format!("[m{mode}]"));
+            }
+        }
+        v.extend(imms.into_iter().map(|(imm8, name)| Gen { info, imm8, mode, name }));
+        if matches!(name, "add.d" | "permb") {
+            for mode in [1, 2] {
+                let imm8 = 0;
+                v.push(Gen { info, imm8, mode, name: format!("{name}[m{mode}]") });
+            }
+        }
+    }
+    v
+}
+
+enum Body<'a> {
+    Spec(&'a str),
+    Gen(&'a Gen),
+}
+
 /// Whole program with k instances per body and l iterations; `bench` None is the baseline (empty
 /// loop body)
-fn program(bench: Option<(&str, bool)>, k: usize, l: usize) -> Vec<u8> {
+fn program(bench: Option<(&Body, bool)>, k: usize, l: usize) -> Vec<u8> {
     let mut w = vec![mov(6, 1), movi(0, 0)];
     w.extend((0..NV).map(|k| vmem(op::LD, k, 64 * k)));
+    w.extend(lddw(2, M));
     let mut body = vec![];
-    if let Some((name, dep)) = bench {
-        let base = name.split('=').next().unwrap();
-        if matches!(base, "splat.d" | "splat.q" | "insert.q") {
-            w.extend(lddw(1, S));
+    match bench {
+        Some((Body::Spec(name), dep)) => {
+            let base = name.split('=').next().unwrap();
+            if matches!(base, "splat.d" | "splat.q" | "insert.q") {
+                w.extend(lddw(1, S));
+            }
+            for j in 0..k {
+                body.extend(instance(name, dep, j));
+            }
         }
-        for j in 0..k {
-            body.extend(instance(name, dep, j));
+        Some((Body::Gen(g), dep)) => {
+            if g.r1_value() {
+                w.extend(lddw(1, S));
+            }
+            body.extend((0..k).map(|j| g.instance(dep, j)));
         }
+        None => {}
     }
     w.push(movi(8, l as i32));
     let len = body.len() as i32;
@@ -264,10 +408,22 @@ impl Runner {
 
     fn run(&mut self, jit: bool) -> (u64, ProgramResult) {
         self.ctx.remaining = 1 << 40;
-        let mut vm = EbpfVm::new(self.exe.get_loader().clone(), self.exe.get_sbpf_version(), &mut *self.ctx, self.stack_len);
+        let mut vm =
+            EbpfVm::new(self.exe.get_loader().clone(), self.exe.get_sbpf_version(), &mut *self.ctx, self.stack_len);
         vm.registers[1] = ebpf::MM_INPUT_START;
         let mut mode = if jit { ExecutionMode::Jit } else { ExecutionMode::Interpreted };
         vm.execute_program(&self.exe, &mut mode, &mut self.frames)
+    }
+
+    /// CU, result and vector registers of one run
+    fn run_state(&mut self, jit: bool) -> (u64, String, Vec<VectorRegister>) {
+        self.ctx.remaining = 1 << 40;
+        let mut vm =
+            EbpfVm::new(self.exe.get_loader().clone(), self.exe.get_sbpf_version(), &mut *self.ctx, self.stack_len);
+        vm.registers[1] = ebpf::MM_INPUT_START;
+        let mut mode = if jit { ExecutionMode::Jit } else { ExecutionMode::Interpreted };
+        let (cu, result) = vm.execute_program(&self.exe, &mut mode, &mut self.frames);
+        (cu, format!("{result:?}"), vm.vector_registers.to_vec())
     }
 
     fn batch(&mut self, jit: bool, repeat: usize) -> f64 {
@@ -291,12 +447,28 @@ fn time(p: &mut Runner, b: &mut Runner, jit: bool) -> (f64, f64) {
     (median(tp), median(tb))
 }
 
+/// CU per op and baseline-subtracted ns per op of a checked program
+fn measure(label: String, text: &[u8], base_text: &[u8], input: &[u8], cus: &[u64], ok: &mut bool) -> Row {
+    let (mut p, mut b) = (Runner::new(text, input), Runner::new(base_text, input));
+    let cu = (p.run(false).0 - b.run(false).0) as f64 / N as f64;
+    if cus.iter().any(|c| *c != cus[0]) {
+        eprintln!("{label}: CU differ between runs {cus:?}");
+        *ok = false;
+    }
+    let (ji, jb) = time(&mut p, &mut b, true);
+    let (ii, ib) = time(&mut p, &mut b, false);
+    let row = Row { label, cu, jit_ns: (ji - jb) / N as f64, interp_ns: (ii - ib) / N as f64 };
+    eprintln!("{:40} cu {:5.2} jit {:7.3} ns interp {:8.3} ns", row.label, row.cu, row.jit_ns, row.interp_ns);
+    row
+}
+
 fn main() {
     let filter = std::env::args().nth(1).unwrap_or_default();
     let base_text = program(None, K, L);
     let mut ok = true;
     let mut rows = vec![];
-    for bench in benches() {
+    let all = benches();
+    for bench in &all {
         if shape(bench.name).is_none() || !bench.name.contains(filter.as_str()) {
             continue;
         }
@@ -304,20 +476,23 @@ fn main() {
             if !(if dep { bench.dep } else { bench.ind }) {
                 continue;
             }
-            let label = label(&bench, dep);
-            let text = program(Some((bench.name, dep)), K, L);
+            let label = label(bench, dep);
+            let body = Body::Spec(bench.name);
             let mut cus = vec![];
             for (k, l) in CHECKS {
-                let text = program(Some((bench.name, dep)), k, l);
+                let text = program(Some((&body, dep)), k, l);
                 for seed in [1, 2, 3] {
                     let input = input(seed);
-                    let (want, want_r0) = reference(&bench, dep, &input, &text, k, l);
+                    let (want, want_r0) = reference(bench, dep, &input, &text, k, l);
                     for jit in [false, true] {
                         let mut r = Runner::new(&text, &input);
                         let (cu, result) = r.run(jit);
-                        let good = matches!(result, ProgramResult::Ok(r0) if r0 == want_r0) && r.input.as_slice() == &want[..];
+                        let good =
+                            matches!(result, ProgramResult::Ok(r0) if r0 == want_r0) && r.input.as_slice() == &want[..];
                         if !good {
-                            eprintln!("{label} ({k}x{l}): seed {seed} jit {jit}: mismatch ({result:?}, want r0 {want_r0:#x})");
+                            eprintln!(
+                                "{label} ({k}x{l}): seed {seed} jit {jit}: mismatch ({result:?}, want r0 {want_r0:#x})"
+                            );
                             ok = false;
                         }
                         if k == K {
@@ -326,17 +501,45 @@ fn main() {
                     }
                 }
             }
-            let input = input(1);
-            let (mut p, mut b) = (Runner::new(&text, &input), Runner::new(&base_text, &input));
-            let cu = (p.run(false).0 - b.run(false).0) as f64 / N as f64;
-            if cus.iter().any(|c| *c != cus[0]) {
-                eprintln!("{label}: CU differ between runs {cus:?}");
+            let text = program(Some((&body, dep)), K, L);
+            rows.push(measure(label, &text, &base_text, &input(1), &cus, &mut ok));
+        }
+    }
+    let covered: Vec<&str> =
+        all.iter().filter(|b| shape(b.name).is_some()).map(|b| b.name.split('=').next().unwrap()).collect();
+    for g in generated(&covered) {
+        if !g.name.contains(filter.as_str()) {
+            continue;
+        }
+        for dep in [true, false] {
+            if dep && !g.dep() {
+                continue;
+            }
+            let label = format!("{}/{}", g.name, if dep { "dep" } else { "ind" });
+            let body = Body::Gen(&g);
+            let mut cus = vec![];
+            for (k, l) in CHECKS {
+                let text = program(Some((&body, dep)), k, l);
+                for seed in [1, 2, 3] {
+                    let input = g.input(seed);
+                    let mut interp = Runner::new(&text, &input);
+                    let mut jit = Runner::new(&text, &input);
+                    let (a, b) = (interp.run_state(false), jit.run_state(true));
+                    if a != b || interp.input.as_slice() != jit.input.as_slice() || !a.1.starts_with("Ok(") {
+                        eprintln!("{label} ({k}x{l}): seed {seed}: interpreter {} vs jit {}", a.1, b.1);
+                        ok = false;
+                    }
+                    if k == K {
+                        cus.extend([a.0, b.0]);
+                    }
+                }
+            }
+            let text = program(Some((&body, dep)), K, L);
+            let row = measure(label, &text, &base_text, &g.input(1), &cus, &mut ok);
+            if (row.cu - g.info.cu(g.imm8) as f64).abs() > 0.01 {
+                eprintln!("{}: CU {} per op, table {}", row.label, row.cu, g.info.cu(g.imm8));
                 ok = false;
             }
-            let (ji, jb) = time(&mut p, &mut b, true);
-            let (ii, ib) = time(&mut p, &mut b, false);
-            let row = Row { label, cu, jit_ns: (ji - jb) / N as f64, interp_ns: (ii - ib) / N as f64 };
-            eprintln!("{:40} cu {:5.2} jit {:7.3} ns interp {:8.3} ns", row.label, row.cu, row.jit_ns, row.interp_ns);
             rows.push(row);
         }
     }

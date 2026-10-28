@@ -4,8 +4,10 @@
 # independent (8 chains) variants, minus an empty-loop baseline. Ours: compare/opbench (raw bytecode
 # with our encoding), Dean's: compare/ops_dean.rs (his macro assembler, intrinsic call form). Both
 # check every program against the host reference in compare/opbench/src/spec.rs on three inputs,
-# interpreter and JIT, then time it: mean of back-to-back runs (fresh VM, one memory mapping) in
-# batches of about 2 ms, median of 9. Ops above 4 ns/CU on the JIT are listed on stderr.
+# interpreter and JIT. Ours also covers every other op of the table and its variants, generated
+# from sbpf's op table and checked interpreter against JIT on the whole VM state. Then each is
+# timed: mean of back-to-back runs (fresh VM, one memory mapping) in batches of about 2 ms, median
+# of 9. Ops above 4 ns/CU on the JIT are listed on stderr.
 #
 # usage: ops.sh ours|dean   -> one JSON line {"ops": [{"op", "cu", "jit_ns_per_op", ...}], "ok"}
 set -euo pipefail
