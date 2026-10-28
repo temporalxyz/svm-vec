@@ -42,7 +42,20 @@ against Dean's simd experiment (blueshift-gg/solana-sbpf@7941ce5, his avx-512 ji
 | keccak-f, cu / permutation | 1,348 | 988 | 1.36× fewer |
 | keccak-f, jit / permutation | 445 ns | 320–372 ns | 1.20–1.39× faster |
 
-jit ranges are over separate invocations of the script. details, method and caveats are in `results/`.
+jit ranges are over separate invocations of the script.
+
+the wider suite (`results/suite.md`), same method, Dean / ours:
+
+| kernel | cu | jit | ours faster by |
+|---|---:|---:|---:|
+| sha-256, 16 blocks | 3,460 / 1,954 | 1.05 / 0.49 µs | 2.2× |
+| blake3, 1 MiB | 1.88M / 1.07M | 756 / 218 µs | 3.5× (his kernel is 8-way, ours 16-way) |
+| curve25519 field mul, 8 × 256 | 35,724 / 18,392 | 8.06 / 4.36 µs | 1.85× |
+| sort 256 u32 | 1,761 / 1,031 | 501 / 273 ns | 1.84× |
+| int8 mlp, unrolled | 1,696 / 1,257 | 1.84 / 1.46 µs | 1.26× |
+| perps risk math, 256 positions | 821 / 869 | 0.57 / 0.79 µs | 0.72× (memory-bound, his bulk loads win) |
+
+on the jit, every op of ours costs under 2.8 ns per cu, including loads and stores. details, method and caveats are in `results/`.
 
 ## layout
 

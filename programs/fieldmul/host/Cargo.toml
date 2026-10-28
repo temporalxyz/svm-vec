@@ -1,0 +1,10 @@
+[package]
+name = "fieldmul-host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+num-bigint = "0.4"
+
+[workspace]
