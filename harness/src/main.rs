@@ -19,12 +19,14 @@ use std::{error::Error, ptr::NonNull, sync::Arc, time::Instant};
 
 const USAGE: &str =
     "usage: svm-run PROGRAM.so [--input FILE]... [--entrypoint SYMBOL|0xADDR|pc:N]...
-               [--runs N] [--budget CU] [--heap BYTES] [--expect FILE]... [--hex] [--allow-error]
+               [--runs N] [--repeat N] [--budget CU] [--heap BYTES] [--expect FILE]... [--hex] [--allow-error]
 
   --input FILE        initial contents of the writable input region (default: empty)
   --entrypoint E      function to enter instead of the ELF entry point: a symbol name (needs a
                       symbol table), a virtual address or an instruction index (default: ELF entry)
   --runs N            timed runs per engine, the median is reported (default: 10)
+  --repeat N          time N back-to-back executions per run on the same memory mapping, with
+                      a fresh VM each, and report the mean (default: 1, a single execution)
   --budget CU         compute unit budget (default: 1400000)
   --heap BYTES        size of the zeroed heap region at MM_HEAP_START (default: 32768)
   --expect FILE       expected final input region, one per case or one for all cases
@@ -308,10 +310,10 @@ struct Outcome {
 fn execute(
     executable: &Executable<Context>,
     input: &[u8],
-    budget: u64,
-    heap_size: usize,
+    options: &Options,
     jit: bool,
 ) -> (Outcome, u64) {
+    let (budget, heap_size) = (options.budget, options.heap_size);
     let config = executable.get_config();
     let mut input = input.to_vec();
     let mut stack = AlignedMemory::<{ ebpf::HOST_ALIGN }>::zero_filled(config.stack_size());
@@ -340,7 +342,7 @@ fn execute(
         logs: vec![],
     };
     let mut call_frames = vec![CallFrame::default(); config.max_call_depth];
-    let (compute_units, result, elapsed) = {
+    let (compute_units, result, elapsed, output) = {
         let mut vm = EbpfVm::new(
             executable.get_loader().clone(),
             executable.get_sbpf_version(),
@@ -355,18 +357,38 @@ fn execute(
         };
         let start = Instant::now();
         let (compute_units, result) = vm.execute_program(executable, &mut mode, &mut call_frames);
-        let elapsed = start.elapsed().as_nanos() as u64;
+        let mut elapsed = start.elapsed().as_nanos() as u64;
+        drop(vm);
+        // Outcome of the first execution. Repeated ones see the input it left, only their time counts
+        let (output, log_count) = (input.clone(), context.logs.len());
+        if options.repeat > 1 {
+            let start = Instant::now();
+            for _ in 0..options.repeat {
+                context.remaining = budget;
+                let mut vm = EbpfVm::new(
+                    executable.get_loader().clone(),
+                    executable.get_sbpf_version(),
+                    &mut context,
+                    stack.len(),
+                );
+                vm.registers[1] = ebpf::MM_INPUT_START;
+                std::hint::black_box(vm.execute_program(executable, &mut mode, &mut call_frames));
+            }
+            elapsed = start.elapsed().as_nanos() as u64 / options.repeat as u64;
+        }
+        context.logs.truncate(log_count);
         (
             compute_units,
             Result::from(result).map_err(|err| format!("{err:?}")),
             elapsed,
+            output,
         )
     };
     drop(context.memory_mapping);
     let outcome = Outcome {
         result,
         compute_units,
-        output: input,
+        output,
         logs: context.logs,
     };
     (outcome, elapsed)
@@ -387,6 +409,7 @@ struct Options {
     entrypoints: Vec<String>,
     expects: Vec<String>,
     runs: usize,
+    repeat: u32,
     budget: u64,
     heap_size: usize,
     hex: bool,
@@ -401,6 +424,7 @@ fn parse_options() -> Result<Options, String> {
         entrypoints: vec![],
         expects: vec![],
         runs: 10,
+        repeat: 1,
         budget: 1_400_000,
         heap_size: 32 * 1024,
         hex: false,
@@ -413,6 +437,9 @@ fn parse_options() -> Result<Options, String> {
             "--entrypoint" => options.entrypoints.push(value()?),
             "--expect" => options.expects.push(value()?),
             "--runs" => options.runs = value()?.parse().map_err(|err| format!("--runs: {err}"))?,
+            "--repeat" => {
+                options.repeat = value()?.parse().map_err(|err| format!("--repeat: {err}"))?
+            }
             "--budget" => {
                 options.budget = value()?.parse().map_err(|err| format!("--budget: {err}"))?
             }
@@ -498,8 +525,7 @@ fn run(options: &Options) -> Result<(), String> {
             let mut first: Option<Outcome> = None;
             for (engine, jit) in [("interpreter", false), ("jit", true)] {
                 for run in 0..options.runs {
-                    let (outcome, elapsed) =
-                        execute(&executable, &input, options.budget, options.heap_size, jit);
+                    let (outcome, elapsed) = execute(&executable, &input, options, jit);
                     times[jit as usize].push(elapsed);
                     match &first {
                         None => first = Some(outcome),
@@ -528,6 +554,7 @@ fn run(options: &Options) -> Result<(), String> {
                 "output_sha256": hex(&Sha256::digest(&outcome.output)),
                 "logs": outcome.logs,
                 "runs": options.runs,
+                "repeat": options.repeat,
                 "interpreter_ns": median(times[0].clone()),
                 "jit_ns": median(times[1].clone()),
                 "jit_compile_ns": compile_ns,
