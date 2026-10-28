@@ -9,8 +9,8 @@ zen 4 (epyc 9534), median of 300 runs, 3 repetitions agree within noise.
 |---|---|---|---|
 | scalar sbpf, stock jit (`--features scalar-only`) | 490,048 | 360.7 µs | 1.70 ms |
 | scalar sbpf, in a vector program (inline translation) | 490,051 | 166.9 µs | 1.69 ms |
-| **vector ops** | **2,108** | **1.6 µs** | 44.6 µs |
-| ratio, stock scalar / vector | **232×** | **225×** | 38× |
+| **vector ops** | **2,108** | **0.91 µs** | 44.6 µs |
+| ratio, stock scalar / vector | **232×** | **396×** | 38× |
 
 - output is byte-identical to the host reference on the interpreter and the jit, for seeds 1–5
 - vector path: 72 vector ops in the binary. layer 1 hot loop per 4 inputs: 1 `ldbc.d` + 8 `ld` (constant `off`) + 8 `dpbusd` + 7 scalar, no `mov`s. accumulators stay in v0–v7 across the loop

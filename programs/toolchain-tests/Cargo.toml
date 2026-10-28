@@ -5,6 +5,7 @@ members = [
     "branchy",
     "calls",
     "dot",
+    "masks",
     "misc",
     "nested",
     "offsets",

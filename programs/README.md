@@ -98,6 +98,11 @@ error naming the function:
   uses are all in the same basic block are spilled to 64-byte stack slots automatically, so
   straight-line overflow works. Values live across a loop or branch are not spilled.
 
+Masks (`__mmask8`–`__mmask64`) are plain integers and live in scalar registers. Runs of loads
+(stores) from one object at offsets 64 apart become one `ldn` (`stn`) where the allocator can
+give them consecutive registers; `_svm512_loadu_n::<N>` / `_svm512_storeu_n::<N>` ask for it
+explicitly. Fused or not, the CU are the same.
+
 `if`/`match` and loop-carried vectors are fine: phis become `mov`s only where the allocator
 cannot give both sides the same register, and selects become a conditional `mov`.
 
@@ -116,7 +121,8 @@ cannot give both sides the same register, and selects become a conditional `mov`
 | `spill` | 31 live vectors (one spill and reload through the stack) |
 | `offsets` | constant displacements in `off` (negative, up to 32767, and one too far to fold) |
 | `calls` | a vector live across a call to a non-inlined vector function |
-| `all_ops` | every intrinsic once |
+| `masks` | merge and zero masks, a masked update in a loop, mask results, `ld.m`/`st.m`, gather, scatter, `ldn`/`stn` |
+| `all_ops` | every intrinsic once, masked forms included (run: both engines agree, no fault) |
 
 ```sh
 ./build.sh && python3 toolchain-tests/check.py           # static checks
