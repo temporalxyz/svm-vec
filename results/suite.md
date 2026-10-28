@@ -12,6 +12,7 @@ Ratio = Dean / ours. JIT and interpreter times are ns per program run (median of
 | sort | 1,761 | 1,031 | 1.71 | 504 / 501 / 495 | 274 / 273 / 271 | 1.84 | 0.285 | 0.265 | 90.2 | 32.3 |
 | perps | 821 | 869 | 0.94 | 565 / 574 / 516 | 787 / 792 / 786 | 0.72 | 0.688 | 0.906 | 52.8 | 23.6 |
 | mlp-unrolled | 1,696 | 1,257 | 1.35 | 2,791 / 1,662 / 1,836 | 1,450 / 1,460 / 1,455 | 1.26 | 1.082 | 1.158 | 58.2 | 35.9 |
+| matmul (measured separately, after the suite) | 50,479 | 25,482 | 1.98 | 15,887 / 16,622 / 19,138 | 15,360 / 15,240 / 16,105 | 1.08 | 0.329 | 0.603 | 60.1 | 35.3 |
 | falcon (per verify) | 22,029 | 20,770.5 | 1.06 | 12,800 / 12,900 / 20,300 | 11,576 / 11,632 / 11,630 | 1.11 | 0.586 | 0.560 | not measured | not measured |
 | keccak (per permutation) | 1,348 | 988.01 | 1.36 | 445 / 445 / 445 | 316 / 314 / 315 | 1.41 | 0.330 | 0.319 | not measured | not measured |
 | mlp (programs/mlp, not unrolled) | 1,696 | 2,108 | 0.80 | 1,652 / 1,622 / 1,620 | 1,577 / 1,571 / 1,591 | 1.03 | 0.957 | 0.748 | not measured | not measured |
@@ -23,6 +24,7 @@ Ratio = Dean / ours. JIT and interpreter times are ns per program run (median of
 - fieldmul: curve25519, 8 lanes × 256 sequential multiplications, radix 2^52 with madd52 on both sides. ours runs a register-only fast path and falls back to a general path when a 2^-38-probability carry condition fails, so its cu are input-dependent in theory
 - sort: 256 u32 keys, both sides generated from one network generator (`programs/sort/net.rs`)
 - perps: batch fixed-point risk math over 256 positions: pnl, funding, equity and a margin check per position, 5 i64 arrays in, 4 out. ours is a plain rust loop, his is generated straight-line code. memory-bound: ours does 288 single-register loads/stores, his 18 32-slot bulk transfers. Dean wins this one
+- matmul: int8 C = A × B, A 32×256 u8 (input), B 256×128 s8 (rodata), C i32, no requantization. 16,384 dpbusd on both sides. ours: 6×4 register tiles (24 accumulators), k loop unrolled 16. his: fully unrolled 4×2 tiles, the fastest of five shapes on the jit (his 38,094-cu variant is 18.1–18.7 µs). measured on its own, 3 interleaved rounds, load average 21–22. ours does 7,168 single-register loads, likely most of its jit time
 - mlp-unrolled: `programs/mlp` fully unrolled (2,108 → 1,257 cu), against `compare/dean-mlp`
 - falcon, keccak, mlp: from `compare/compare.py`
 

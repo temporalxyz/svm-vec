@@ -53,6 +53,7 @@ the wider suite (`results/suite.md`), same method, Dean / ours:
 | curve25519 field mul, 8 × 256 | 35,724 / 18,392 | 8.06 / 4.36 µs | 1.85× |
 | sort 256 u32 | 1,761 / 1,031 | 501 / 273 ns | 1.84× |
 | int8 mlp, unrolled | 1,696 / 1,257 | 1.84 / 1.46 µs | 1.26× |
+| int8 matmul 32×256 · 256×128 | 50,479 / 25,482 | 16.6 / 15.4 µs | 1.08× |
 | perps risk math, 256 positions | 821 / 869 | 0.57 / 0.79 µs | 0.72× (memory-bound, his bulk loads win) |
 
 on the jit, every op of ours costs under 2.8 ns per cu, including loads and stores. details, method and caveats are in `results/`.
