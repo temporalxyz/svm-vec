@@ -1,0 +1,8 @@
+[package]
+name = "svm-intrinsics"
+version = "0.1.0"
+edition = "2024"
+description = "512-bit vector intrinsics for sBPF (lowered by the sbpf-linker vector pass)"
+license = "MIT"
+
+[dependencies]

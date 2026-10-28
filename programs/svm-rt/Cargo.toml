@@ -1,0 +1,8 @@
+[package]
+name = "svm-rt"
+version = "0.1.0"
+edition = "2024"
+description = "Minimal no_std runtime for sBPF test programs: panic handler and abort"
+publish = false
+
+[dependencies]

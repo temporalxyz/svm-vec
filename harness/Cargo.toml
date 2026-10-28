@@ -1,0 +1,17 @@
+[package]
+name = "svm-harness"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "svm-run"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+sha2 = "0.10"
+solana-sbpf = { path = "../sbpf" }
+
+[profile.release]
+debug = 1

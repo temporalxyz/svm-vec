@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = [
+    "all_ops",
+    "branchy",
+    "calls",
+    "dot",
+    "misc",
+    "nested",
+    "offsets",
+    "pressure",
+    "spill",
+    "vadd",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+svm-intrinsics = { path = "../../svm-intrinsics" }
+svm-rt = { path = "../svm-rt" }
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+panic = "abort"

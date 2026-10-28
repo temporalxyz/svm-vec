@@ -1,0 +1,12 @@
+[package]
+name = "pressure"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+svm-intrinsics.workspace = true
+svm-rt.workspace = true

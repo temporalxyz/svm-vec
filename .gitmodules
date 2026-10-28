@@ -1,0 +1,8 @@
+[submodule "sbpf"]
+	path = sbpf
+	url = git@github.com:temporalxyz/sbpf.git
+	branch = vector-ops
+[submodule "sbpf-linker"]
+	path = sbpf-linker
+	url = git@github.com:temporalxyz/sbpf-linker.git
+	branch = vector-pass

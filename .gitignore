@@ -1,0 +1,6 @@
+target/
+target-*/
+ref/
+programs/*/data/
+*.so
+slop/
