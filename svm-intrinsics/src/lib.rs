@@ -2039,12 +2039,12 @@ unsafe extern "C" {
     fn __svm_stn(a: u32, p: *mut u8, k: u32, n: u32);
 }
 
-/// `ldn` (0x0c): loads `N` vectors (2 ≤ N ≤ 30) from `p..p+64N` with one
-/// access. Where the pass cannot give the results consecutive registers,
-/// it emits `N` single loads instead.
+/// `ldn` (0x0c): loads `N` vectors (2 ≤ N ≤ 30) from `p..p+64N`, exactly
+/// like `N` single loads in ascending order. Where the pass cannot give the
+/// results consecutive registers, it emits those single loads.
 ///
 /// # Safety
-/// `p..p+64N` must be readable and lie in one memory region.
+/// `p..p+64N` must be readable.
 #[inline(always)]
 pub unsafe fn _svm512_loadu_n<const N: usize>(p: *const u8) -> [__svm512i; N] {
     const { assert!(2 <= N && N <= 30, "N must be 2..=30") };
@@ -2057,12 +2057,12 @@ pub unsafe fn _svm512_loadu_n<const N: usize>(p: *const u8) -> [__svm512i; N] {
     out
 }
 
-/// `stn` (0x0d): stores the `N` vectors of `a` (2 ≤ N ≤ 30) to `p..p+64N`
-/// with one access. Where the pass cannot place them in consecutive
-/// registers, it emits `N` single stores instead.
+/// `stn` (0x0d): stores the `N` vectors of `a` (2 ≤ N ≤ 30) to `p..p+64N`,
+/// exactly like `N` single stores in ascending order. Where the pass cannot
+/// place them in consecutive registers, it emits those single stores.
 ///
 /// # Safety
-/// `p..p+64N` must be writable and lie in one memory region.
+/// `p..p+64N` must be writable.
 #[inline(always)]
 pub unsafe fn _svm512_storeu_n<const N: usize>(p: *mut u8, a: [__svm512i; N]) {
     const { assert!(2 <= N && N <= 30, "N must be 2..=30") };
