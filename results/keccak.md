@@ -6,8 +6,8 @@ zen 4 (epyc 9534), per permutation: k = 100 permutations minus k = 0. cu are ide
 |---|---:|---:|---:|
 | cu per permutation | 11,824 | 1,348 | **988** |
 | ops per round | ~493 scalar insns | 28 calls × 2 cu | **41** × 1 cu |
-| jit ns per permutation | 8,900 | 445 | **320–372** |
-| interpreter µs per permutation | 48 | 54 | 30 |
+| jit ns per permutation | 8,850 | 445 | **261–304** |
+| interpreter µs per permutation | 48 | 54 (earlier run) | 43 |
 
 - scalar and ours: `programs/keccak` on `svm-run`, output checked against the host reference on both engines
 - Dean: his runtime and his generated `keccak_f`, through his `Runner` (`RegisterCached`). his falcon program gets a keccak-only entry (`compare/dean-keccak-only.patch`, 9 lines)

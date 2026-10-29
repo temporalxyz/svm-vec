@@ -1,0 +1,19 @@
+[package]
+name = "sort"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+svm-intrinsics = { path = "../../svm-intrinsics" }
+svm-rt = { path = "../svm-rt" }
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
+panic = "abort"
+
+[workspace]

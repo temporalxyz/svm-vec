@@ -35,6 +35,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "libcalls"
+version = "0.1.0"
+dependencies = [
+ "svm-intrinsics",
+ "svm-rt",
+]
+
+[[package]]
+name = "masks"
+version = "0.1.0"
+dependencies = [
+ "svm-intrinsics",
+ "svm-rt",
+]
+
+[[package]]
 name = "misc"
 version = "0.1.0"
 dependencies = [

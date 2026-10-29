@@ -5,8 +5,8 @@
 
 Clones blueshift-gg/solana-sbpf at REV into target/compare/dean, adds a keccak-only entry to his
 Falcon program (dean-keccak-only.patch, needs cargo-build-sbf), then runs in interleaved rounds:
-his Falcon bench, ours, his keccak-only example, ours, and Blueshift's scalar program on our
-harness. Our side uses svm-run --repeat, the same method as his: the mean of back-to-back runs on
+his Falcon bench, ours, his keccak-only example, ours, our MLP in his intrinsics (dean-mlp,
+mlp_dean.rs), ours, and Blueshift's scalar program on our harness. Our side uses svm-run --repeat, the same method as his: the mean of back-to-back runs on
 one memory mapping, a fresh VM each, median over samples. Run ./bench.sh first.
 """
 import argparse, json, os, re, statistics, struct, subprocess, sys
@@ -19,6 +19,7 @@ dean = work / "dean"
 run = root / "harness/target/release/svm-run"
 falcon = root / "programs/falcon"
 keccak = root / "programs/keccak/target/bpfel-unknown-none/release/libkeccak.so"
+mlp = root / "programs/mlp/target/bpfel-unknown-none/release/libmlp.so"
 bench = Path(os.environ.get("TMPDIR", "/tmp")) / "svm-vec-bench"  # written by ./bench.sh
 
 ap = argparse.ArgumentParser()
@@ -38,10 +39,12 @@ if not dean.exists():
     sh("git", "clone", "-q", "https://github.com/blueshift-gg/solana-sbpf", dean)
 sh("git", "checkout", "-q", "-f", REV, cwd=dean)
 sh("git", "apply", root / "compare/dean-keccak-only.patch", cwd=dean)
-sh("cp", root / "compare/keccak_only.rs", dean / "examples/")
+sh("cp", root / "compare/keccak_only.rs", root / "compare/mlp_dean.rs", dean / "examples/")
 sh("cargo-build-sbf", "--arch", "v3", cwd=dean / "simd-falcon/program")
 sh("cp", dean / "simd-falcon/program/target/deploy/falcon_simd.so", work / "dean-keccak.so")
 sh("git", "checkout", "-q", "-f", REV, cwd=dean)
+# programs/mlp's vector path in his intrinsics (compare/dean-mlp)
+sh("env", f"CARGO_TARGET_DIR={work / 'dean-mlp'}", "cargo-build-sbf", "--arch", "v3", cwd=root / "compare/dean-mlp")
 
 # Blueshift's scalar program takes [0u64][ix length][signature][message][program id]
 sigs = (falcon / "fixtures/sigs.bin").read_bytes()
@@ -55,14 +58,14 @@ while i < len(sigs):
     i += 668 + n
 
 
-def svm_run(so, inputs, runs, repeat):
-    args = [run, so, "--runs", str(runs), "--repeat", str(repeat)]
+def svm_run(so, inputs, runs, repeat, *extra):
+    args = [run, so, "--runs", str(runs), "--repeat", str(repeat), *extra]
     for p in inputs:
         args += ["--input", p]
     return json.loads(sh(*args))["cases"]
 
 
-rows = {k: [] for k in ["falcon", "keccak", "scalar"]}
+rows = {k: [] for k in ["falcon", "keccak", "mlp", "scalar"]}
 for r in range(a.rounds):
     out = sh("cargo", "bench", "-q", "--features", "simd-experiment", "--bench", "simd_falcon", cwd=dean, stderr=True)
     d = re.search(r"simd\s+jit\s+CUs median\s+(\d+)\s+time median\s+([\d.]+)", out)
@@ -79,6 +82,12 @@ for r in range(a.rounds):
     rows["keccak"].append((float(k[1]), float(k[2]), (c[1]["cu"] - c[0]["cu"]) / 100,
                            (c[1]["jit_ns"] - c[0]["jit_ns"]) / 100))
 
+    mi, me = bench / "mlp/input-vector.bin", bench / "mlp/expected-vector.bin"
+    m = re.search(r"CU (\d+) jit_ns ([\d.]+)", sh("cargo", "run", "-q", "--release", "--features", "simd-experiment",
+                  "--example", "mlp_dean", "--", work / "dean-mlp/deploy/mlp_dean.so", mi, me, "1200", cwd=dean))
+    c = svm_run(mlp, [mi], 15, 1250, "--expect", me)[0]
+    rows["mlp"].append((int(m[1]), float(m[2]), c["cu"], c["jit_ns"]))
+
     s = svm_run(dean / "simd-falcon/fixtures/falcon_blueshift.so", scalar_inputs, 9, 7)
     assert all(x["r0"] == 0 for x in s)
     rows["scalar"].append((int(b[1]), float(b[2]), statistics.median(x["cu"] for x in s),
@@ -93,6 +102,9 @@ print(f"| Falcon-512 verify, CU | {med('falcon', 0):,.0f} | {med('falcon', 2):,.
 print(f"| Falcon-512 verify, JIT µs | {spread('falcon', 1)} | {spread('falcon', 3)} | {med('falcon', 1) / med('falcon', 3):.2f}× faster |")
 print(f"| Keccak-f, CU / permutation | {med('keccak', 0):,.0f} | {med('keccak', 2):,.0f} | {med('keccak', 0) / med('keccak', 2):.2f}× fewer |")
 print(f"| Keccak-f, JIT ns / permutation | {spread('keccak', 1)} | {spread('keccak', 3)} | {med('keccak', 1) / med('keccak', 3):.2f}× faster |")
+x = lambda k, i, more, less: f"{r:.2f}× {more}" if (r := med(k, i) / med(k, i + 2)) >= 1 else f"{1 / r:.2f}× {less}"
+print(f"| int8 MLP, CU / inference | {med('mlp', 0):,.0f} | {med('mlp', 2):,.0f} | {x('mlp', 0, 'fewer', 'more')} |")
+print(f"| int8 MLP, JIT ns / inference | {spread('mlp', 1)} | {spread('mlp', 3)} | {x('mlp', 1, 'faster', 'slower')} |")
 print("\nBlueshift's scalar Falcon-512, same inputs, timed by both harnesses:\n")
 print("| | Dean's harness | svm-run |\n|---|---:|---:|")
 print(f"| CU | {med('scalar', 0):,.0f} | {med('scalar', 2):,.0f} |")
