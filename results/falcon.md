@@ -7,7 +7,7 @@ zen 4 (epyc 9534), 64 signatures:
 | | blueshift scalar | Dean, blueshift-gg/solana-sbpf@7941ce5 | ours |
 |---|---:|---:|---:|
 | cu, median (min, max) | 182,764 (172,264, 254,225) | 22,029 (20,460, 31,872) | **20,770** (19,352, 28,134) |
-| jit µs, median | 294 | 12.8 | **10.6** |
+| jit µs, median | 305 | 14.5 | **10.6** |
 
 jit times are from `compare/compare.py`: same timing method for all three, 3 interleaved rounds (`results/comparison.md`).
 
