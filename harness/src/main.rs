@@ -226,7 +226,6 @@ fn loader(enable_symbol_and_section_labels: bool) -> Arc<BuiltinProgram<Context>
         aligned_memory_mapping: true,
         enable_symbol_and_section_labels,
         enabled_sbpf_versions: SBPFVersion::V3..=SBPFVersion::V3,
-        vector_pair_one_cu: std::env::var("SVM_PAIR_ONE_CU").map_or(true, |v| v != "0"),
         ..Config::default()
     });
     loader.register_definition::<SyscallAbort>("abort").unwrap();
