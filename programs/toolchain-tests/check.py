@@ -503,6 +503,16 @@ def case_masks(rng):
     return inp, exp
 
 
+def case_libcalls(rng):
+    n1, n2 = 64 * 3 + rng.randrange(64), 64 * 2 + rng.randrange(64)
+    inp = bytearray(struct.pack("<QQ", n1, n2) + rnd(rng, 2048 - 16))
+    exp = bytearray(inp)
+    exp[192:320] = inp[64:192]
+    exp[1024:1024 + n1] = inp[512:512 + n1]
+    exp[1536:1536 + n2] = bytes(n2)
+    return inp, exp
+
+
 def case_all_ops(rng):
     """Every op in both engines: only checks that the run succeeds."""
     inp = bytearray(rnd(rng, 192) + struct.pack("<Q", rng.getrandbits(64)) + bytes(40000))
@@ -525,6 +535,7 @@ KERNELS = {
                "gather.qq/1": 1, "st.m/1": 1, "scatter.qq": 1, "add.q/1": 1, "ldn": 1, "stn": 1,
                "shri.d/2": 1, "cmp": 2, "mpopcnt": 1, "mtzcnt": 1, "mlzcnt": 1, "bitshuf": 1},
               case_masks),
+    "libcalls": ({"ld": 3, "st": 4, "splat.b": 1}, case_libcalls),
     "all_ops": ({**{OPS[op][0]: 1 for op in OPS if op != 0x09},
                  **{f"{OPS[op][0]}/{m}": 1 for op in OPS for m in OPS[op][3] if m}}, case_all_ops),
 }

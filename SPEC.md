@@ -27,7 +27,35 @@ as one little-endian u64: `0x85 | (0x20 | mode) << 8 | off << 16 | imm << 32`.
 
 - enabled by `Config::enable_vector_ops` (poc gate; production would bind it to a new sbpf version, because today v3 accepts `src=2` calls at deploy and faults at runtime). requires an sbpf version with static syscalls (v3+)
 - verifier rejects: unknown op, any register field ≥ 30, a nonzero field the op doesn't use (see kind), imm8 out of range for the op, a mask mode the op does not allow, `off` ≠ 0 on a non-memory op, `imm[15]` set, `ldn`/`stn` registers past `v29`
+- programs with vector ops need the aligned memory mapping (sbpf v4, or `Config::aligned_memory_mapping` on v3), the verifier rejects them otherwise: with the unaligned mapping every memory access of the jit calls into the host, which spills the vector registers
 - cu: 1 per op, except where the op table gives a cu. an op of c > 1 cu fails with `ExceededMaxInstructions` at its own pc, before any effect, unless c cu remain
+
+## host requirements
+
+`Config::enable_vector_ops` requires an x86-64 cpu with avx-512 of intel ice lake or amd zen 4 or newer (not the intel client parts without avx-512, e.g. alder lake), on every host and whatever engine runs the program. there is no portable fallback, so a program cannot fail on some validators only. `BuiltinProgram::new_loader` panics on a host without the features, `vector::check_host_features()` returns the missing one as `EbpfError::UnsupportedHostFeatures` for a check at validator startup. jit compilation does not check again.
+
+required: os support for the avx-512 state (xcr0 bits 1, 2, 5, 6, 7) and these cpuid features:
+
+| feature | cpuid |
+|---|---|
+| avx512f | 7.0 ebx[16] |
+| avx512dq | 7.0 ebx[17] |
+| avx512ifma | 7.0 ebx[21] |
+| avx512cd | 7.0 ebx[28] |
+| avx512bw | 7.0 ebx[30] |
+| avx512vl | 7.0 ebx[31] |
+| sha | 7.0 ebx[29] |
+| bmi1 | 7.0 ebx[3] |
+| avx512_vbmi | 7.0 ecx[1] |
+| avx512_vbmi2 | 7.0 ecx[6] |
+| gfni | 7.0 ecx[8] |
+| vaes | 7.0 ecx[9] |
+| vpclmulqdq | 7.0 ecx[10] |
+| avx512_vnni | 7.0 ecx[11] |
+| avx512_bitalg | 7.0 ecx[12] |
+| avx512_vpopcntdq | 7.0 ecx[14] |
+| popcnt | 1 ecx[23] |
+| lzcnt | 0x80000001 ecx[5] |
 
 ## scalar conventions
 

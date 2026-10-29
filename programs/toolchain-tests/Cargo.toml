@@ -4,6 +4,7 @@ members = [
     "all_ops",
     "branchy",
     "calls",
+    "libcalls",
     "dot",
     "masks",
     "misc",
