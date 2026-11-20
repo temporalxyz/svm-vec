@@ -9,7 +9,7 @@ let acc = _svm512_dpbusd_epi32(acc, x, w);   // no register numbers
 becomes one 1-cu instruction, `dpbusd v0, v8, v9`, which the jit lowers to one `vpdpbusd zmm0, zmm8, zmm9`.
 
 - ops are `CALL_IMM` with `src = 2`, register numbers in the imm (`SPEC.md`)
-- 30 vector registers, hidden vm state, pinned to `zmm0`–`zmm29` by the jit
+- 16 vector registers, hidden vm state, pinned to `zmm0`–`zmm15` by the jit, which uses no other vector register
 - sbpf-linker allocates the registers on whole-program llvm ir, after lto and before bpf codegen
 
 ## results
@@ -59,7 +59,7 @@ jit ranges are over separate invocations of the script. details, method and cave
 
 ## size
 
-- **sbpf:** +250 / −6 in 9 existing files. new `vector.rs` (883 lines), `vector_jit.rs` (1202), `x86_evex.rs` (180), `tests/vector.rs` (1226)
+- **sbpf:** +250 / −6 in 9 existing files. new `vector.rs` (652 lines), `vector_jit.rs` (933), `x86_evex.rs` (170), `tests/vector.rs` (1168)
 - **sbpf-linker:** +161 / −4 in 6 existing files. new `src/vector/` (~3,000 lines, ~700 of them tests)
 - programs without vector ops take the old paths: the linker pass runs only if the inputs reference `__svm_*`, and every jit change is gated on the program using a vector register
 
@@ -76,5 +76,4 @@ jit ranges are over separate invocations of the script. details, method and cave
 - interpreter and x86-64 jit only: no aarch64 jit, no firedancer
 - gated by `Config::enable_vector_ops`. production needs a new sbpf version, or a feature gate plus proof that no deployed program contains a `src = 2` call (v3 accepts them at deploy today and faults when they run)
 - vector values must stay in ssa. arrays of vectors indexed in non-unrolled loops are rejected. spilling only covers values whose remaining uses are in the same block
-- cu is 1 per op, so multi-instruction ops (`hsum`, `insert`, compares) are underpriced
 - the crates.io sbpf-assembler rejects `call` with `off`. the linker works around it; the fix belongs upstream

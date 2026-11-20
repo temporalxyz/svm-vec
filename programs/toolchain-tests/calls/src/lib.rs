@@ -1,7 +1,7 @@
 //! A vector live across a call to a function that uses vector registers.
 //!
-//! input: [0, 64) a, [64, 128) b. output: [64, 128) b + b (by `double`),
-//! [128, 192) a, [192, 256) a ^ (b + b).
+//! input: [0, 64) a, [64, 128) b, both 8×u64. output: [64, 128) b + b (by
+//! `double`), [128, 192) a, [192, 256) a ^ (b + b).
 #![no_std]
 
 use svm_intrinsics::*;
@@ -11,7 +11,7 @@ use svm_rt as _;
 unsafe fn double(p: *mut u8) {
     unsafe {
         let x = _svm512_loadu_si512(p);
-        _svm512_storeu_si512(p, _svm512_add_epi32(x, x));
+        _svm512_storeu_si512(p, _svm512_add_epi64(x, x));
     }
 }
 

@@ -21,8 +21,9 @@ pub unsafe extern "C" fn entrypoint(input: *mut u8) -> u64 {
             acc = _svm512_dpbusd_epi32(acc, x, y);
         }
         _svm512_storeu_si512(input.add(64), acc);
-        let sum = _svm512_reduce_add_epi32(acc) as u32 as u64;
-        input.add(8).cast::<u64>().write_unaligned(sum);
+        let lanes = input.add(64).cast::<u32>();
+        let sum = (0..16).fold(0u32, |s, i| s.wrapping_add(lanes.add(i).read_unaligned()));
+        input.add(8).cast::<u64>().write_unaligned(sum as u64);
     }
     0
 }

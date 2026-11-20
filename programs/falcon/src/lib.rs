@@ -138,7 +138,10 @@ unsafe fn norm(s2: *const u8, c: *const u8) -> u64 {
         let acc = ntt_core(s2, c);
         // 16 u32 sums (each < 2^31) to u64
         let even = _svm512_srli_epi64::<32>(_svm512_slli_epi64::<32>(acc));
-        _svm512_reduce_add_epi64(_svm512_add_epi64(even, _svm512_srli_epi64::<32>(acc))) as u64
+        let sums = _svm512_add_epi64(even, _svm512_srli_epi64::<32>(acc));
+        let mut lanes = core::mem::MaybeUninit::<[u64; 8]>::uninit();
+        _svm512_storeu_si512(lanes.as_mut_ptr().cast(), sums);
+        lanes.assume_init().iter().sum()
     }
 }
 

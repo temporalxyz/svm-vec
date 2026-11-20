@@ -2,7 +2,7 @@
 
 Programs here are plain `no_std` Rust built for `bpfel-unknown-none` with a stock nightly
 compiler. They call `core::arch`-style intrinsics from `svm-intrinsics`
-(`_svm512_add_epi32(a, b)`, ...). The forked sbpf-linker in `../sbpf-linker` allocates the
+(`_svm512_add_epi64(a, b)`, ...). The forked sbpf-linker in `../sbpf-linker` allocates the
 vector registers and emits the vector ops, producing an sBPF v3 `.so`. See `../SPEC.md` for the
 ops and their encoding.
 
@@ -72,7 +72,7 @@ pub unsafe extern "C" fn entrypoint(input: *mut u8) -> u64 {
     unsafe {
         let a = _svm512_loadu_si512(input);
         let b = _svm512_loadu_si512(input.add(64));
-        _svm512_storeu_si512(input.add(128), _svm512_add_epi32(a, b));
+        _svm512_storeu_si512(input.add(128), _svm512_add_epi64(a, b));
     }
     0
 }
@@ -94,7 +94,7 @@ error naming the function:
   also caught at compile time by the intrinsics.
 - a vector live across a call to a non-inlined function that uses every remaining register, or
   across an indirect call.
-- more than 30 vectors live at once when the excess cannot be spilled. Values whose remaining
+- more than 16 vectors live at once when the excess cannot be spilled. Values whose remaining
   uses are all in the same basic block are spilled to 64-byte stack slots automatically, so
   straight-line overflow works. Values live across a loop or branch are not spilled.
 
@@ -107,13 +107,13 @@ cannot give both sides the same register, and selects become a conditional `mov`
 
 | kernel | exercises |
 |---|---|
-| `vadd` | straight-line ops, `st`, `hsum` |
+| `vadd` | straight-line ops, `st`, a horizontal sum through the stack |
 | `dot` | loop-carried `dpbusd` accumulator (no moves) |
 | `nested` | nested loops with inner and outer accumulators |
 | `branchy` | if/else merges inside a loop, a vector `select` |
-| `misc` | an accumulator still live afterwards (`mov` inserted), imm8 ops, insert/extract, clmul |
-| `pressure` | exactly 30 live vectors (`v0`–`v29`, no spills) |
-| `spill` | 31 live vectors (one spill and reload through the stack) |
+| `misc` | an accumulator still live afterwards (`mov` inserted), imm8 ops, permutes |
+| `pressure` | exactly 16 live vectors (`v0`–`v15`, no spills) |
+| `spill` | 17 live vectors (one spill and reload through the stack) |
 | `offsets` | constant displacements in `off` (negative, up to 32767, and one too far to fold) |
 | `calls` | a vector live across a call to a non-inlined vector function |
 | `all_ops` | every intrinsic once |
